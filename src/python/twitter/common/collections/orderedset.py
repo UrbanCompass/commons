@@ -55,6 +55,10 @@ class OrderedSet(collections.MutableSet):
       prev[NEXT] = next
       next[PREV] = prev
 
+  def __getitem__(self, index):
+    # HACKHACKHACK
+    return list(self)[index]
+
   def __iter__(self):
     end = self.end
     curr = end[NEXT]

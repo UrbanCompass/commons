@@ -202,7 +202,8 @@ def open(*files):
   """Attempts to open the given files using the preferred native viewer or editor."""
   if files:
     if os.uname()[0].lower() != 'darwin':
-      print('Sorry, open currently only supports OSX')
+      print('Sorry, open currently only supports OSX.')
+      print('  command: open(%s)' % list(files))
     else:
       subprocess.Popen(['open'] + list(files))
 
