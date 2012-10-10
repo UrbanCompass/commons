@@ -18,7 +18,7 @@ class Installer(object):
       >>> pypi = Fetcher.pypi()
       >>> celery_installer = Installer(pypi.fetch('celery>2.4'))  # this takes several seconds
       >>> celery_installer.distribution()
-      celery 2.5.0 (/private/var/folders/Uh/UhXpeRIeFfGF7HoogOKC+++++TI/-Tmp-/tmpaWRGGW/lib/python2.6/site-packages)
+      celery 2.5.0 (/private/var/folders/Uh/UhXpeRIeFfGF7HoogOKC+++++TI/-Tmp-/tmpaWRGGW/lib/python2.7/site-packages)
 
     You can then take that distribution and activate it:
       >>> celery_distribution = celery_installer.distribution()

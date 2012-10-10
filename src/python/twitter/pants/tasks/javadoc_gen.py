@@ -123,9 +123,9 @@ class JavadocGen(Task):
       # ...
       #  File "...src/python/twitter/pants/tasks/jar_create.py", line 170, in javadocjar
       #      pool.map(createjar, jobs)
-      #    File "...lib/python2.6/multiprocessing/pool.py", line 148, in map
+      #    File "...lib/python2.7/multiprocessing/pool.py", line 148, in map
       #      return self.map_async(func, iterable, chunksize).get()
-      #    File "...lib/python2.6/multiprocessing/pool.py", line 422, in get
+      #    File "...lib/python2.7/multiprocessing/pool.py", line 422, in get
       #      raise self._value
       #  NameError: global name 'self' is not defined
       futures = []

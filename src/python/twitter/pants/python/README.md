@@ -761,7 +761,7 @@ embed arbitrary strings at the beginning of them and they're still valid
 zips.  Hence simple PEX files are born:
 
 ```console
-$ echo '#!/usr/bin/env python2.6' > flower.pex && cat flower.zip >> flower.pex
+$ echo '#!/usr/bin/env python2.7' > flower.pex && cat flower.zip >> flower.pex
 $ chmod +x flower.pex
 $ ./flower.pex
 i like flowers
@@ -777,7 +777,7 @@ warning [pants.pex]:  25 extra bytes at beginning or within zipfile
   7900812                   543 files
 
 $ head -c 25 pants.pex
-#!/usr/bin/env python2.6
+#!/usr/bin/env python2.7
 ```
 
 ## PEX `__main__.py` ##

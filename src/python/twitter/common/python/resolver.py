@@ -45,8 +45,8 @@ class Resolver(Environment):
       Fetching MarkupSafe>=0.9.2 => 3314.960ms
       Building MarkupSafe>=0.9.2 => 542.930ms
       Resolving mako => 11110.769ms
-      [Mako 0.6.2 (/private/var/folders/Uh/UhXpeRIeFfGF7HoogOKC+++++TI/-Tmp-/tmplyR5kH/lib/python2.6/site-packages),
-       MarkupSafe 0.15 (/private/var/folders/Uh/UhXpeRIeFfGF7HoogOKC+++++TI/-Tmp-/tmptUWECl/lib/python2.6/site-packages)]
+      [Mako 0.6.2 (/private/var/folders/Uh/UhXpeRIeFfGF7HoogOKC+++++TI/-Tmp-/tmplyR5kH/lib/python2.7/site-packages),
+       MarkupSafe 0.15 (/private/var/folders/Uh/UhXpeRIeFfGF7HoogOKC+++++TI/-Tmp-/tmptUWECl/lib/python2.7/site-packages)]
 
     With an install cache:
       >>> resolver = Resolver(fetcher = pypi,
