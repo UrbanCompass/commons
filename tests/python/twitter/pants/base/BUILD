@@ -17,9 +17,10 @@
 python_tests(name = 'base',
   sources = globs('*.py'),
   dependencies = [
-    pants("src/python/twitter/common/collections"),
-    pants("src/python/twitter/common/dirutil"),
-    pants("src/python/twitter/pants:pants-lib"),
-    pants("src/python/twitter/pants:pants-deps"),
+    'src/python/twitter/common/collections',
+    'src/python/twitter/common/dirutil',
+    'src/python/twitter/pants:pants-deps',
+    'src/python/twitter/pants:pants-lib',
+    'tests/python/twitter/pants/testutils',
   ]
 )

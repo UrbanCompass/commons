@@ -18,7 +18,6 @@ __author__ = 'Benjy Weinberger'
 
 import shlex
 
-from twitter.pants.targets import JavaLibrary, JavaTests, ScalaLibrary, ScalaTests
 from twitter.pants.tasks import Task
 from twitter.pants.tasks.binary_utils import profile_classpath, runjava
 from twitter.pants.tasks.jvm_task import JvmTask
@@ -47,6 +46,7 @@ class ScalaRepl(JvmTask):
         self.args.extend(shlex.split(arg))
 
   def execute(self, targets):
+    self.context.lock.release()
     runjava(
       jvmargs=self.jvm_args,
       classpath=self.classpath(profile_classpath(self.profile), confs=self.confs),

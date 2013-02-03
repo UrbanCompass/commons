@@ -16,14 +16,17 @@
 
 __author__ = 'John Sirois'
 
+import StringIO
 import os
 import re
+import signal
 import subprocess
 import sys
 import time
 
 from twitter.common import log
 from twitter.common.dirutil import safe_open
+from twitter.common.python.platforms import Platform
 
 from twitter.pants import get_buildroot
 from twitter.pants.java import NailgunClient, NailgunError
@@ -103,15 +106,29 @@ class NailgunTask(Task):
     cp = (self._classpath or []) + (classpath or [])
     if self._daemon:
       nailgun = self._get_nailgun_client()
+
+      def call_nailgun(main_class, *args):
+        if self.dry_run:
+          print('********** NailgunClient dry run: %s %s' % (main_class, ' '.join(args)))
+          return 0
+        else:
+          return nailgun(main_class, *args)
+
       try:
         if cp:
-          nailgun('ng-cp', *[os.path.relpath(jar, get_buildroot()) for jar in cp])
-        return nailgun(main, *args)
+          call_nailgun('ng-cp', *[os.path.relpath(jar, get_buildroot()) for jar in cp])
+        return call_nailgun(main, *args)
       except NailgunError as e:
         self._ng_shutdown()
         raise e
     else:
-      return binary_utils.runjava(main=main, classpath=cp, args=args, jvmargs=jvmargs)
+      only_write_cmd_line_to = StringIO.StringIO() if self.dry_run else None
+      ret = binary_utils.runjava(main=main, classpath=cp, args=args, jvmargs=jvmargs,
+        only_write_cmd_line_to=only_write_cmd_line_to)
+      if only_write_cmd_line_to:
+        print('********** Direct Java dry run: %s' % only_write_cmd_line_to.getvalue())
+        only_write_cmd_line_to.close()
+      return ret
 
   def _ng_shutdown(self):
     endpoint = self._get_nailgun_endpoint()
@@ -232,56 +249,81 @@ class NailgunTask(Task):
       sys.exit(0)
 
 
-try:
-  import psutil
+# Pick implementations for killall and _find. We don't use psutil, as it uses
+# native code and so is not portable, leading to packaging and deployment headaches.
+# TODO: Extract this to a class and add a paired test guarded by
+# http://pytest.org/latest/skipping.html#skipping.
+plat = Platform.current()
+if plat.startswith('linux') or plat.startswith('macosx'):
+  # TODO: add other platforms as needed, after checking that these cmds work there as expected.
+
+  # Returns the cmd's output, as a list of lines, including the newline characters.
+  def _run_cmd(cmd):
+    runcmd = cmd + ' && echo "\n${PIPESTATUS[*]}"'
+    popen = subprocess.Popen(runcmd, shell=True, executable='/bin/bash', bufsize=-1, close_fds=True,
+                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    (stdout_data, _) = popen.communicate()
+    stdout_data_lines = [line for line in stdout_data.strip().split('\n') if line]
+    if not stdout_data_lines:
+      raise NailgunError('No output for command (%s)' % runcmd)
+    try:
+      # Get the return codes of each piped cmd.
+      piped_return_codes = [int(x) for x in stdout_data_lines[-1].split(' ') if x]
+    except ValueError:
+      raise NailgunError('Failed to parse result (%s) for command (%s)' % (stdout_data_lines, cmd))
+    # Drop the echoing of PIPESTATUS, which our caller doesn't care about.
+    stdout_data_lines = stdout_data_lines[:-1]
+    failed = any(piped_return_codes)
+    if failed:
+      raise NailgunError('Failed to execute cmd: "%s". Exit codes: %s. Output: "%s"' % \
+                        (cmd, piped_return_codes, ''.join(stdout_data_lines)))
+    return stdout_data_lines
+
+  def _find_matching_pids(strs):
+    # Grep all processes whose cmd-lines contain all the strs, except for the grep process itself.
+    filters = ' | '.join(["grep -F -e '%s'" % s for s in strs])
+    data = _run_cmd("ps axwww | %s | (grep -v grep || true) | cut -b 1-5" % filters)
+    pids = [int(x.strip()) for x in data if x]
+    return pids
 
   def _find_ngs(everywhere=False):
-    def cmdline_matches(cmdline):
-      if everywhere:
-        return any(filter(lambda arg: arg.startswith(NailgunTask.PANTS_NG_ARG_PREFIX), cmdline))
-      else:
-        return NailgunTask.PANTS_NG_ARG in cmdline
-
-    for proc in psutil.process_iter():
-      try:
-        if 'java' == proc.name and cmdline_matches(proc.cmdline):
-          yield proc
-      except (psutil.AccessDenied, psutil.NoSuchProcess):
-        pass
-
+    arg = NailgunTask.PANTS_NG_ARG_PREFIX if everywhere else NailgunTask.PANTS_NG_ARG
+    return _find_matching_pids([arg])
 
   def killall(log, everywhere=False):
-    for proc in _find_ngs(everywhere=everywhere):
+    for pid in _find_ngs(everywhere=everywhere):
       try:
-        NailgunTask._log_kill(log, proc.pid)
-        proc.kill()
-      except (psutil.AccessDenied, psutil.NoSuchProcess):
+        NailgunTask._log_kill(log, pid)
+        os.kill(pid, signal.SIGKILL)
+      except OSError:
         pass
 
   NailgunTask.killall = staticmethod(killall)
 
-
-  def _find_ng_listen_port(proc):
-    for connection in proc.get_connections(kind='tcp'):
-      if connection.status == 'LISTEN':
-        host, port = connection.local_address
-        return port
-    return None
-
-
+  DIGITS_RE = re.compile('^\d+$')
   def _find(pidfile):
     pidfile_arg = NailgunTask.create_pidfile_arg(pidfile)
-    for proc in _find_ngs(everywhere=False):
-      try:
-        if pidfile_arg in proc.cmdline:
-          port = _find_ng_listen_port(proc)
-          if port:
-            return proc.pid, port
-      except (psutil.AccessDenied, psutil.NoSuchProcess):
-        pass
-    return None
+    pids = _find_matching_pids([NailgunTask.PANTS_NG_ARG, pidfile_arg])
+    if len(pids) != 1:
+      return None
+    pid = pids[0]
+
+    # Expected output of the lsof cmd: pPID\nn[::127.0.0.1]:PORT
+    lines = _run_cmd('lsof -a -p %s -i TCP -s TCP:LISTEN -Fn' % pid)
+    if len(lines) != 2 or lines[0] != 'p%s' % pid:
+      return None
+    port = lines[1][lines[1].rfind(':') + 1:].strip()
+    if not DIGITS_RE.match(port):
+      return None
+    return pid, int(port)
 
   NailgunTask._find = staticmethod(_find)
-except ImportError:
+
+else:
+  # This is some other platform. In practice, it's likely that the cmds above will work
+  # on this platform (pants assumes a UNIX variant), so test that out and modify the
+  # condition above appropriately. Note: This is unlikely to be your biggest headache
+  # in porting pants to this other platform, since many pants tasks spawn subprocesses
+  # for various commands, and none of them have been tested on unsupported platforms.
   NailgunTask.killall = None
   NailgunTask._find = None

@@ -26,27 +26,28 @@ def pylint_build_filter():
 python_library(
   name = 'pants-deps',
   dependencies = [
-    python_requirement("elementtree"),
-    python_requirement('mako'),
+    python_requirement('elementtree'),
     python_requirement('markdown'),
-    python_requirement('psutil'),
-    python_requirement("pygments"),
-    python_requirement("pylint", version_filter=pylint_build_filter),
-    python_requirement("pytest"),
-    python_requirement("python_daemon"),
+    python_requirement('pygments'),
+    python_requirement('pylint', version_filter=pylint_build_filter),
+    python_requirement('pystache'),
+    python_requirement('pytest'),
+    python_requirement('python_daemon'),
   ]
 )
 
 python_library(
   name = 'pants-lib',
   dependencies = [
-    pants("src/python/twitter/common"),
-    pants("src/python/twitter/common/app"),
-    pants("src/python/twitter/common/confluence"),
-    pants("src/python/twitter/common/dirutil"),
-    pants("src/python/twitter/common/lang"),
-    pants("src/python/twitter/common/python"),
-    pants(":pants-deps"),
+    'src/python/twitter/common',
+    'src/python/twitter/common/app',
+    'src/python/twitter/common/confluence',
+    'src/python/twitter/common/dirutil',
+    'src/python/twitter/common/java',
+    'src/python/twitter/common/lang',
+    'src/python/twitter/common/process',
+    'src/python/twitter/common/python',
+    ':pants-deps',
   ],
   sources = PANTS_SOURCES,
   resources = PANTS_RESOURCES
@@ -55,7 +56,7 @@ python_library(
 python_binary(
   name = 'pants',
   dependencies = [
-    pants(":pants-lib")
+    ':pants-lib',
   ],
   source = 'bin/pants_exe.py',
 )
@@ -63,8 +64,8 @@ python_binary(
 python_binary(
   name = 'ng',
   dependencies = [
-    pants('src/python/twitter/common/app'),
-    pants('src/python/twitter/common/log')
+    'src/python/twitter/common/app',
+    'src/python/twitter/common/log',
   ],
   source = 'java/nailgun_client.py',
 )
@@ -74,8 +75,8 @@ python_binary(
 page(name = 'readme',
   source = 'README.md',
   dependencies = [
-    pants('src/python/twitter/pants/docs:migration'),
-    pants(':install')
+    'src/python/twitter/pants/docs:migration',
+    ':install',
   ]
 )
 

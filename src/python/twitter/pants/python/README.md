@@ -150,7 +150,7 @@ python_binary(
   name = "hello_world",
   source = "hello_world.py",
   dependencies = [
-    pants("src/python/twitter/common/app"),
+    "src/python/twitter/common/app",
   ]
 )
 ```
@@ -207,7 +207,7 @@ targets take the form `<path>:<target name>` with the special cases:
 1. in the case of `path/to/directory/BUILD:target`, the `BUILD` component may be elided and instead `path/to/directory:target` may be used
 2. `path/to/directory` is short form for `path/to/directory:directory`, so `src/python/twitter/common/app` is short form for `src/python/twitter/common/app/BUILD:app`
 
-`src/python/twitter/tutorial/BUILD` referenced `pants('src/python/twitter/common/app')` in its
+`src/python/twitter/tutorial/BUILD` referenced `'src/python/twitter/common/app'` in its
 dependencies.  The `pants()` keyword is akin to a "pointer dereference" for an address.  It will point
 to whatever target is described at that address, in this case a `python_library` target:
 
@@ -218,11 +218,11 @@ python_library(
   name = "app",
   sources = globs('*.py'),
   dependencies = [
-    pants('src/python/twitter/common/dirutil'),
-    pants('src/python/twitter/common/lang'),
-    pants('src/python/twitter/common/options'),
-    pants('src/python/twitter/common/util'),
-    pants('src/python/twitter/common/app/modules'),
+    'src/python/twitter/common/dirutil',
+    'src/python/twitter/common/lang',
+    'src/python/twitter/common/options',
+    'src/python/twitter/common/util',
+    'src/python/twitter/common/app/modules',
   ]
 )
 ```
@@ -264,7 +264,7 @@ of two possible parameters:
 1. `source`: The source file that should be executed within the "library" otherwise defined by `python_binary`
 2. `entry_point`: The entry point that should be executed within the "library" otherwise defined by `python_binary`.  Entry points take the
 format of `pkg_resources.EntryPoint`, which is something akin to `some.module.name:my.attr` which means
-run the function pointed by `my.attr` inside the module `some.module` inside the environment.
+run the function pointed by `my.attr` inside the module `some.module.name` inside the environment.
 The `:my.attr` component can be omitted and the module is executed directly (presuming it has a `__main__.py`.)
 
 
@@ -406,14 +406,14 @@ python_binary(
   name = "hello_world",
   source = "hello_world.py",
   dependencies = [
-    pants(":hello_world_lib")
+    ":hello_world_lib"
   ]
 )
 
 python_library(
   name = "hello_world_lib",
   dependencies = [
-    pants("src/python/twitter/common/app"),
+    "src/python/twitter/common/app",
     python_requirement("tornado"),
     python_requirement("psutil"),
   ]

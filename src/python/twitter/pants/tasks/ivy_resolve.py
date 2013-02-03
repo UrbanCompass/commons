@@ -13,7 +13,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # ==================================================================================================
-from twitter.pants.targets.jar_dependency import JarDependency
 
 __author__ = 'John Sirois'
 
@@ -64,20 +63,24 @@ class IvyResolve(NailgunTask):
     option_group.add_option(mkflag("outdir"), dest="ivy_resolve_outdir",
                             help="Emit ivy report outputs in to this directory.")
 
+    option_group.add_option(mkflag("cache"), dest="ivy_resolve_cache",
+                            help="Use this directory as the ivy cache, instead of the " \
+                                 "default specified in pants.ini.")
+
   def __init__(self, context):
     classpath = context.config.getlist('ivy', 'classpath')
     nailgun_dir = context.config.get('ivy-resolve', 'nailgun_dir')
     NailgunTask.__init__(self, context, classpath=classpath, workdir=nailgun_dir)
 
     self._ivy_settings = context.config.get('ivy', 'ivy_settings')
-    self._cachedir = context.config.get('ivy', 'cache_dir')
+    self._cachedir = context.options.ivy_resolve_cache or context.config.get('ivy', 'cache_dir')
     self._confs = context.config.getlist('ivy-resolve', 'confs')
     self._transitive = context.config.getbool('ivy-resolve', 'transitive')
     self._args = context.config.getlist('ivy-resolve', 'args')
 
     self._profile = context.config.get('ivy-resolve', 'profile')
 
-    self._template_path = os.path.join('ivy_resolve', 'ivy.mk')
+    self._template_path = os.path.join('ivy_resolve', 'ivy.mustache')
 
     self._work_dir = context.config.get('ivy-resolve', 'workdir')
     self._classpath_file = os.path.join(self._work_dir, 'classpath')
@@ -139,10 +142,10 @@ class IvyResolve(NailgunTask):
     classpath_targets = filter(is_classpath, targets)
     target_workdir = os.path.join(self._work_dir, dirname_for_requested_targets(targets))
     target_classpath_file = os.path.join(target_workdir, 'classpath')
-    with self.invalidated(classpath_targets, only_buildfiles=True, invalidate_dependants=True) as invalidated:
+    with self.invalidated(classpath_targets, only_buildfiles=True, invalidate_dependents=True) as invalidation_check:
       # Note that it's possible for all targets to be valid but for no classpath file to exist at
       # target_classpath_file, e.g., if we previously build a superset of targets.
-      if invalidated.invalid_targets() or not os.path.exists(target_classpath_file):
+      if len(invalidation_check.invalid_vts) > 0 or not os.path.exists(target_classpath_file):
         self._exec_ivy(target_workdir, targets, [
           '-cachepath', target_classpath_file,
           '-confs'
@@ -173,6 +176,9 @@ class IvyResolve(NailgunTask):
 
     if self._report:
       self._generate_ivy_report()
+      
+    if self.context.products.isrequired("ivy_jar_products"):
+      self._populate_ivy_jar_products()
 
     create_jardeps_for = self.context.products.isrequired('jar_dependencies')
     if create_jardeps_for:
@@ -194,9 +200,25 @@ class IvyResolve(NailgunTask):
     safe_mkdir(os.path.dirname(ivyxml))
     with open(ivyxml, 'w') as output:
       generator = Generator(pkgutil.get_data(__name__, self._template_path),
-                            root_dir = get_buildroot(),
-                            lib = template_data)
+        root_dir = get_buildroot(),
+        lib = template_data)
       generator.write(output)
+
+  def _populate_ivy_jar_products(self):
+    """
+    Populate the build products with an IvyInfo object for each
+    generated ivy report.
+    For each configuration used to run ivy, a build product entry
+    is generated for the tuple ("ivy", configuration, ivyinfo)
+    """
+    genmap = self.context.products.get('ivy_jar_products')
+    # For each of the ivy reports:
+    for conf in self._confs:
+      # parse the report file, and put it into the build products.
+      # This is sort-of an abuse of the build-products. But build products
+      # are already so abused, and this really does make sense.
+      ivyinfo = self._ivy_utils.parse_xml_report(conf)
+      genmap.add("ivy", conf, [ivyinfo])
 
   def _generate_ivy_report(self):
     classpath = binary_utils.nailgun_profile_classpath(self, self._profile)
@@ -245,8 +267,7 @@ class IvyResolve(NailgunTask):
       force = jar.force,
       excludes = [self._generate_exclude_template(exclude) for exclude in jar.excludes],
       transitive = jar.transitive,
-      ext = jar.ext,
-      url = jar.url,
+      artifacts = jar.artifacts,
       configurations = ';'.join(jar._configurations),
     )
     override = self._overrides.get((jar.org, jar.name))
@@ -261,6 +282,11 @@ class IvyResolve(NailgunTask):
       yield (path.strip() for path in cp.read().split(os.pathsep) if path.strip())
 
   def _mapjars(self, genmap, target):
+    """
+    Parameters:
+      genmap: the jar_dependencies ProductMapping entry for the required products.
+      target: the target whose jar dependencies are being retrieved.
+    """
     mapdir = os.path.join(self._classpath_dir, target.id)
     safe_mkdir(mapdir, clean=True)
     ivyargs = [

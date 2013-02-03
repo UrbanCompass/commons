@@ -1,17 +1,32 @@
-import hashlib
+
+from __future__ import print_function
+
 import os
+import sys
 
 from collections import defaultdict
 from contextlib import contextmanager
 
 from twitter.common.collections import OrderedSet
 from twitter.common.dirutil import Lock
+from twitter.common.process import ProcessProviderFactory
 
+from twitter.pants import get_buildroot
 from twitter.pants import SourceRoot
 from twitter.pants.base import ParseContext
 from twitter.pants.base.target import Target
 from twitter.pants.targets import Pants
 from twitter.pants.goal.products import Products
+
+
+# Utility definition for grabbing process info for locking.
+def _process_info(pid):
+  ps = ProcessProviderFactory.get()
+  ps.collect_set([pid])
+  handle = ps.get_handle(pid)
+  cmdline = handle.cmdline().replace('\0', ' ')
+  return '%d (%s)' % (pid, cmdline)
+
 
 class Context(object):
   """Contains the context for a single run of pants.
@@ -28,13 +43,15 @@ class Context(object):
     def info(self, msg): pass
     def warn(self, msg): pass
 
-  def __init__(self, config, options, target_roots, lock=None, log=None):
+  def __init__(self, config, options, target_roots, lock=Lock.unlocked(), log=None, timer=None):
     self._config = config
     self._options = options
-    self._lock = lock or Lock.unlocked()
+    self._lock = lock
     self._log = log or Context.Log()
     self._state = {}
     self._products = Products()
+    self._buildroot = get_buildroot()
+    self.timer = timer
 
     self.replace_targets(target_roots)
 
@@ -76,6 +93,32 @@ class Context(object):
   def __str__(self):
     return 'Context(id:%s, state:%s, targets:%s)' % (self.id, self.state, self.targets())
 
+  def acquire_lock(self):
+    """ Acquire the global lock for the root directory associated with this context. When
+    a goal requires serialization, it will call this to acquire the lock.
+    """
+    def onwait(pid):
+      print('Waiting on pants process %s to complete' % _process_info(pid), file=sys.stderr)
+      return True
+    if self._lock.is_unlocked():
+      runfile = os.path.join(self._buildroot, '.pants.run')
+      self._lock = Lock.acquire(runfile, onwait=onwait)
+
+  def release_lock(self):
+    """Release the global lock if it's held.
+    Returns True if the lock was held before this call.
+    """
+    if self._lock.is_unlocked():
+      return False
+    else:
+      self._lock.release()
+      self._lock = Lock.unlocked()
+      return True
+
+  def is_unlocked(self):
+    """Whether the global lock object is actively holding the lock."""
+    return self._lock.is_unlocked()
+
   def replace_targets(self, target_roots):
     """Replaces all targets in the context with the given roots and their transitive
     dependencies.
@@ -83,10 +126,10 @@ class Context(object):
     self._target_roots = target_roots
     self._targets = OrderedSet()
     for target in target_roots:
-      self.add_target(target)
+      self._add_target(target)
     self.id = Target.identify(self._targets)
 
-  def add_target(self, target):
+  def _add_target(self, target):
     """Adds a target and its transitive dependencies to the run context.
 
     The target is not added to the target roots.
@@ -101,8 +144,15 @@ class Context(object):
     This method ensures the target resolves files against the given target_base, creating the
     directory if needed and registering a source root.
     """
+    if 'derived_from' in kwargs:
+      derived_from = kwargs.get('derived_from')
+      del kwargs['derived_from']
+    else:
+      derived_from = None
     target = self._create_new_target(target_base, target_type, *args, **kwargs)
-    self.add_target(target)
+    self._add_target(target)
+    if derived_from:
+      target.derived_from = derived_from
     return target
 
   def _create_new_target(self, target_base, target_type, *args, **kwargs):
@@ -125,7 +175,7 @@ class Context(object):
     """
     return filter(predicate, self._targets)
 
-  def dependants(self, on_predicate=None, from_predicate=None):
+  def dependents(self, on_predicate=None, from_predicate=None):
     """Returns  a map from targets that satisfy the from_predicate to targets they depend on that
       satisfy the on_predicate.
     """

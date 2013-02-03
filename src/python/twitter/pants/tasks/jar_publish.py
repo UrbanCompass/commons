@@ -230,14 +230,14 @@ class PomWriter(DependencyWriter):
 
 class IvyWriter(DependencyWriter):
   def __init__(self, get_db):
-    super(IvyWriter, self).__init__(get_db, os.path.join('ivy_resolve', 'ivy.mk'))
+    super(IvyWriter, self).__init__(get_db, os.path.join('ivy_resolve', 'ivy.mustache'))
 
   def templateargs(self, target_jar, confs=None):
     return dict(lib=target_jar.extend(
       publications=set(confs) if confs else set(),
     ))
 
-  def _jardep(self, jar, transitive=True, ext=None, url=None, configurations='default'):
+  def _jardep(self, jar, transitive=True, configurations='default'):
     return TemplateData(
       org=jar.org,
       module=jar.name,
@@ -245,16 +245,13 @@ class IvyWriter(DependencyWriter):
       force=jar.force,
       excludes=[self.create_exclude(exclude) for exclude in jar.excludes],
       transitive=transitive,
-      ext=ext,
-      url=url,
+      artifacts=jar.artifacts,
       configurations=configurations,
     )
 
   def jardep(self, jar):
     return self._jardep(jar,
       transitive=jar.transitive,
-      ext=jar.ext,
-      url=jar.url,
       configurations=';'.join(jar._configurations)
     )
 
@@ -635,12 +632,15 @@ class JarPublish(Task):
       user=getpass.getuser(),
       cause='with forced revision' if (org, name) in self.overrides else '(autoinc)'
     )
-    self.check_call(['git', 'pull', '--ff-only', '--tags', 'origin', 'master'])
+    # Note: we do a separate fetch and merge, because git pull may be a fetch+rebase,
+    # which won't work with fast-forwarding.
+    self.check_call(['git', 'fetch', '--tags', 'origin', 'master'])
+    self.check_call(['git', 'merge', '--ff-only', 'origin', 'master'])
     self.check_call(['git', 'tag' , '-a',
                      '-m', 'Publish of %(coordinate)s initiated by %(user)s %(cause)s' % args,
                      '%(org)s-%(name)s-%(rev)s' % args, sha])
 
-    self.check_call(['git', 'commit' , '-a',
+    self.check_call(['git', 'commit' , '--no-verify', '-a',
                      '-m', 'pants build committing publish data for push of '
                            '%(coordinate)s' % args])
 
@@ -666,14 +666,14 @@ class JarPublish(Task):
       raise TaskError(failuremsg or '%s failed with exit code %d' % (' '.join(cmd), result))
 
   def generate_ivysettings(self, publishedjars, publish_local=None):
-    template = pkgutil.get_data(__name__, os.path.join('jar_publish', 'ivysettings.mk'))
+    template = pkgutil.get_data(__name__, os.path.join('jar_publish', 'ivysettings.mustache'))
     with safe_open(os.path.join(self.outdir, 'ivysettings.xml'), 'w') as wrapper:
       generator = Generator(template,
-                            ivysettings=self.ivysettings,
-                            dir=self.outdir,
-                            cachedir=self.cachedir,
-                            published=[TemplateData(org=jar.org, name=jar.name)
-                                       for jar in publishedjars],
-                            publish_local=publish_local)
+        ivysettings=self.ivysettings,
+        dir=self.outdir,
+        cachedir=self.cachedir,
+        published=[TemplateData(org=jar.org, name=jar.name)
+                   for jar in publishedjars],
+        publish_local=publish_local)
       generator.write(wrapper)
       return wrapper.name
