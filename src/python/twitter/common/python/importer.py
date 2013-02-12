@@ -216,7 +216,11 @@ class Nested(object):
     if not basename:
       Nested._ISFILE_CACHE[path] = False
       return False
-    (archive, prefix, zf) = Nested.open(dirname)
+    try:
+      (archive, prefix, zf) = Nested.open(dirname)
+    except IOError:
+      Nested._ISFILE_CACHE[path] = False
+      return False
     try:
       zf.getinfo(os.path.join(prefix, basename))
       Nested._ISFILE_CACHE[path] = True
