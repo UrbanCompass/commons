@@ -136,7 +136,7 @@ class IdeaGen(IdeGen):
       outdir = outdir,
       modules = [ configured_module ],
       java_encoding = self.java_encoding,
-      resource_extensions = self._get_resource_extensions(project),
+      resource_extensions = list(self._get_resource_extensions(project)),
       has_scala = project.has_scala,
       scala_compiler_classpath = project.scala_compiler_classpath,
       scala = TemplateData(fsc = self.fsc) if project.has_scala else None,
