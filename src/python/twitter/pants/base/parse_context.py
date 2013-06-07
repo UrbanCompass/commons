@@ -24,6 +24,7 @@ from twitter.common.lang import Compatibility
 from twitter.pants import get_buildroot
 from twitter.pants.base import BuildFile
 
+
 class ContextError(Exception):
   """Inidicates an action that requires a BUILD file parse context was attempted outside any."""
 
@@ -34,6 +35,22 @@ class ParseContext(object):
 
   _active = collections.deque([])
   _parsed = set()
+
+  _strs_to_exec = [
+    "from twitter.pants import *",
+    "from twitter.common.quantity import Amount, Time",
+  ]
+
+  @classmethod
+  def add_to_exec_context(cls, str_to_exec):
+    """This hook allows for adding symbols to the execution context in which BUILD files are
+    parsed. This should only be used for importing symbols that are used fairly ubiquitously in
+    BUILD files, and possibly for appending to sys.path to get local python code on the python
+    path.
+
+    This will be phased out in favor of a more robust plugin architecture that supports import
+    injection and path amendment."""
+    cls._strs_to_exec.append(str_to_exec)
 
   @staticmethod
   def locate():
@@ -70,19 +87,12 @@ class ParseContext(object):
       del ctx._on_context_exit
       ParseContext._active.pop()
 
-  PANTS_NEW=False
-
-  @staticmethod
-  def enable_pantsnew():
-    """Enables the PANTS_NEW special global in BUILD files to aid in transition."""
-    ParseContext.PANTS_NEW=True
-
   def __init__(self, buildfile):
     self.buildfile = buildfile
     self._parsed = False
 
-  def parse(self, **globalargs):
-    """The entrypoint to parsing of a BUILD file.  Changes the working directory to the BUILD file
+  def parse(self, **global_args):
+    """The entry point to parsing of a BUILD file.  Changes the working directory to the BUILD file
     directory and then evaluates the BUILD file with the ROOT_DIR and __file__ globals set in
     addition to any globals specified as kwargs.  As target methods are parsed they can examine the
     stack to find these globals and thus locate themselves for the purposes of finding files
@@ -90,30 +100,28 @@ class ParseContext(object):
 
     if self.buildfile not in ParseContext._parsed:
       buildfile_family = tuple(self.buildfile.family())
-      ParseContext._parsed.update(buildfile_family)
 
       pants_context = {}
-      ast1 = compile("from twitter.pants import *", "<string>", "exec")
-      ast2 = compile("from twitter.common.quantity import Amount, Time", "<string>", "exec")
-      Compatibility.exec_function(ast1, pants_context)
-      Compatibility.exec_function(ast2, pants_context)
+      for str_to_exec in self._strs_to_exec:
+        ast = compile(str_to_exec, '<string>', 'exec')
+        Compatibility.exec_function(ast, pants_context)
 
       with ParseContext.activate(self):
         start = os.path.abspath(os.curdir)
         try:
           os.chdir(self.buildfile.parent_path)
           for buildfile in buildfile_family:
-            self.buildfile = buildfile
-            eval_globals = copy.copy(pants_context)
-            eval_globals.update({
-              'ROOT_DIR': buildfile.root_dir,
-              '__file__': buildfile.full_path,
+            # We may have traversed a sibling already, guard against re-parsing it.
+            if buildfile not in ParseContext._parsed:
+              ParseContext._parsed.add(buildfile)
 
-              # TODO(John Sirois): kill PANTS_NEW and its usages when pants.new is rolled out
-              'PANTS_NEW': ParseContext.PANTS_NEW
-            })
-            eval_globals.update(globalargs)
-            Compatibility.exec_function(buildfile.code(), eval_globals)
+              eval_globals = copy.copy(pants_context)
+              eval_globals.update({
+                'ROOT_DIR': buildfile.root_dir,
+                '__file__': buildfile.full_path,
+              })
+              eval_globals.update(global_args)
+              Compatibility.exec_function(buildfile.code(), eval_globals)
         finally:
           os.chdir(start)
 

@@ -17,8 +17,10 @@
 import collections
 import os
 
-from twitter.common.collections import OrderedSet
+from twitter.common.collections import OrderedSet, maybe_list
 from twitter.common.decorators import deprecated_with_warning
+
+from twitter.pants import is_concrete
 from twitter.pants.base.address import Address
 from twitter.pants.base.hash_utils import hash_all
 from twitter.pants.base.parse_context import ParseContext
@@ -31,8 +33,11 @@ class TargetDefinitionException(Exception):
 
 
 class Target(object):
-  """The baseclass for all pants targets.  Handles registration of a target amongst all parsed
-  targets as well as location of the target parse context."""
+  """The baseclass for all pants targets.
+
+  Handles registration of a target amongst all parsed targets as well as location of the target
+  parse context.
+  """
 
   _targets_by_address = {}
   _addresses_by_buildfile = collections.defaultdict(OrderedSet)
@@ -40,17 +45,25 @@ class Target(object):
   @staticmethod
   def identify(targets):
     """Generates an id for a set of targets."""
-    # If you change this implementation, consider changing CacheKeyGenerator.combine_cache_keys to match.
-    return hash_all([target.id for target in targets])
+    return Target.combine_ids(target.id for target in targets)
 
   @staticmethod
   def maybe_readable_identify(targets):
-    """Generates an id for a set of targets, but if the set is a single target, makes it the target id."""
-    if len(targets) == 1:
-      id = targets[0].id
-    else:
-      id = Target.identify(targets)
-    return id
+    """Generates an id for a set of targets.
+
+    If the set is a single target, just use that target's id."""
+    return Target.maybe_readable_combine_ids([target.id for target in targets])
+
+  @staticmethod
+  def combine_ids(ids):
+    """Generates a combined id for a set of ids."""
+    return hash_all(sorted(ids))  # We sort so that the id isn't sensitive to order.
+
+  @staticmethod
+  def maybe_readable_combine_ids(ids):
+    """Generates combined id for a set of ids, but if the set is a single id, just use that."""
+    ids = list(ids)  # We can't len a generator.
+    return ids[0] if len(ids) == 1 else Target.combine_ids(ids)
 
   @classmethod
   def get_all_addresses(cls, buildfile):
@@ -58,8 +71,8 @@ class Target(object):
     parses the buildfile to find all the addresses it contains and then returns them."""
 
     def lookup():
-      if buildfile in Target._addresses_by_buildfile:
-        return Target._addresses_by_buildfile[buildfile]
+      if buildfile in cls._addresses_by_buildfile:
+        return cls._addresses_by_buildfile[buildfile]
       else:
         return OrderedSet()
 
@@ -70,13 +83,18 @@ class Target(object):
       ParseContext(buildfile).parse()
       return lookup()
 
-  @staticmethod
-  def get(address):
+  @classmethod
+  def _clear_all_addresses(cls):
+    cls._targets_by_address = {}
+    cls._addresses_by_buildfile = collections.defaultdict(OrderedSet)
+
+  @classmethod
+  def get(cls, address):
     """Returns the specified module target if already parsed; otherwise, parses the buildfile in the
     context of its parent directory and returns the parsed target."""
 
     def lookup():
-      return Target._targets_by_address[address] if address in Target._targets_by_address else None
+      return cls._targets_by_address[address] if address in cls._targets_by_address else None
 
     target = lookup()
     if target:
@@ -85,14 +103,30 @@ class Target(object):
       ParseContext(address.buildfile).parse()
       return lookup()
 
-  def __init__(self, name, is_meta, reinit_check=True):
+  @classmethod
+  def resolve_all(cls, targets, *expected_types):
+    """Yield the resolved concrete targets checking each is a subclass of one of the expected types
+    if specified.
+    """
+    if targets:
+      for target in maybe_list(targets, expected_type=Target):
+        for resolved in filter(is_concrete, target.resolve()):
+          if expected_types and not isinstance(resolved, expected_types):
+            raise TypeError('%s requires types: %s and found %s' % (cls, expected_types, resolved))
+          yield resolved
+
+  def __init__(self, name, reinit_check=True, exclusives=None):
+    # See "get_all_exclusives" below for an explanation of the exclusives parameter.
     # This check prevents double-initialization in multiple-inheritance situations.
+    # TODO(John Sirois): fix target inheritance - use super() to linearize or use alternatives to
+    # multiple inheritance.
     if not reinit_check or not hasattr(self, '_initialized'):
       self.name = name
-      self.is_meta = is_meta
       self.description = None
 
       self.address = self.locate()
+
+      # TODO(John Sirois): id is a builtin - use another name
       self.id = self._create_id()
 
       self.labels = set()
@@ -102,6 +136,49 @@ class Target(object):
       # For synthetic codegen targets this will be the original target from which
       # the target was synthesized.
       self.derived_from = self
+
+      self.declared_exclusives = collections.defaultdict(set)
+      if exclusives is not None:
+        for k in exclusives:
+          self.declared_exclusives[k].add(exclusives[k])
+      self.exclusives = None
+
+  def get_declared_exclusives(self):
+    return self.declared_exclusives
+
+  def add_to_exclusives(self, exclusives):
+    if exclusives is not None:
+      for key in exclusives:
+        self.exclusives[key] |= exclusives[key]
+
+  def get_all_exclusives(self):
+    """ Get a map of all exclusives declarations in the transitive dependency graph.
+
+    For a detailed description of the purpose and use of exclusives tags,
+    see the documentation of the CheckExclusives task.
+
+    """
+    if self.exclusives is None:
+      self._propagate_exclusives()
+    return self.exclusives
+
+  def _propagate_exclusives(self):
+    if self.exclusives is None:
+      self.exclusives = collections.defaultdict(set)
+      self.add_to_exclusives(self.declared_exclusives)
+      # This may perform more work than necessary.
+      # We want to just traverse the immediate dependencies of this target,
+      # but for a general target, we can't do that. _propagate_exclusives is overridden
+      # in subclasses when possible to avoid the extra work.
+      self.walk(lambda t: self._propagate_exclusives_work(t))
+
+  def _propagate_exclusives_work(self, target):
+    # Note: this will cause a stack overflow if there is a cycle in
+    # the dependency graph, so exclusives checking should occur after
+    # cycle detection.
+    if hasattr(target, "declared_exclusives"):
+      self.add_to_exclusives(target.declared_exclusives)
+    return None
 
   def _post_construct(self, func, *args, **kwargs):
     """Registers a command to invoke after this target's BUILD file is parsed."""
@@ -120,23 +197,24 @@ class Target(object):
 
   def locate(self):
     parse_context = ParseContext.locate()
-    return Address(parse_context.buildfile, self.name, self.is_meta)
+    return Address(parse_context.buildfile, self.name)
 
   def register(self):
-    existing = Target._targets_by_address.get(self.address)
+    existing = self._targets_by_address.get(self.address)
     if existing and existing.address.buildfile != self.address.buildfile:
-      raise KeyError("%s already defined in a sibling BUILD file: %s" % (
+      raise KeyError("%s defined in %s already defined in a sibling BUILD file: %s" % (
         self.address,
-        existing.address,
+        self.address.buildfile.full_path,
+        existing.address.buildfile.full_path,
       ))
 
-    Target._targets_by_address[self.address] = self
-    Target._addresses_by_buildfile[self.address.buildfile].add(self.address)
+    self._targets_by_address[self.address] = self
+    self._addresses_by_buildfile[self.address.buildfile].add(self.address)
 
   def resolve(self):
     yield self
 
-  def walk(self, work, predicate = None):
+  def walk(self, work, predicate=None):
     """Performs a walk of this target's dependency graph visiting each node exactly once.  If a
     predicate is supplied it will be used to test each target before handing the target to work and
     descending.  Work can return targets in which case these will be added to the walk candidate set
@@ -144,9 +222,9 @@ class Target(object):
 
     self._walk(set(), work, predicate)
 
-  def _walk(self, walked, work, predicate = None):
+  def _walk(self, walked, work, predicate=None):
     for target in self.resolve():
-      if target not in walked and isinstance(target, Target):
+      if target not in walked:
         walked.add(target)
         if not predicate or predicate(target):
           additional_targets = work(target)
@@ -157,7 +235,6 @@ class Target(object):
               if hasattr(additional_target, '_walk'):
                 additional_target._walk(walked, work, predicate)
 
-
   # TODO(John Sirois): Kill this method once ant backend is gone
   @deprecated_with_warning("you're using deprecated pants commands, http://go/pantsmigration")
   def do_in_context(self, work):
@@ -167,8 +244,8 @@ class Target(object):
     self.description = description
     return self
 
-  def add_label(self, label):
-    self.labels.add(label)
+  def add_labels(self, *label):
+    self.labels.update(label)
 
   def remove_label(self, label):
     self.labels.remove(label)
@@ -190,3 +267,5 @@ class Target(object):
 
   def __repr__(self):
     return "%s(%s)" % (type(self).__name__, self.address)
+
+Target._clear_all_addresses()

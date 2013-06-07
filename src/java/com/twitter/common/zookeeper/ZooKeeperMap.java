@@ -31,6 +31,7 @@ import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.WatchedEvent;
 import org.apache.zookeeper.Watcher;
 
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -48,7 +49,7 @@ import java.util.logging.Logger;
  * parent, as well as on the parent itself.  Instances of this class should be created via the
  * {@link #create} factory method.
  *
- * As of ZooKeeper Version 3.1, the maxiumum allowable size of a data node is 1 MB  A single
+ * As of ZooKeeper Version 3.1, the maximum allowable size of a data node is 1 MB  A single
  * client should be able to hold up to maintain several thousand watches, but this depends on rate
  * of data change as well.
  *
@@ -60,8 +61,6 @@ import java.util.logging.Logger;
  * src/scripts/HenAccess.py in the hen repository.
  *
  * @param <V> the type of values this map stores
- *
- * @author Adam Samet
  */
 public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
 
@@ -78,6 +77,7 @@ public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
   private final Function<byte[], V> deserializer;
 
   private final ConcurrentMap<String, V> localMap;
+  private final Map<String, V> unmodifiableLocalMap;
   private final BackoffHelper backoffHelper;
 
   // Whether it's safe to re-establish watches if our zookeeper session has expired.
@@ -136,6 +136,7 @@ public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
     this.deserializer = Preconditions.checkNotNull(deserializer);
 
     localMap = new ConcurrentHashMap<String, V>();
+    unmodifiableLocalMap = Collections.unmodifiableMap(localMap);
     backoffHelper = new BackoffHelper();
     safeToRewatchLock = new Object();
     safeToRewatch = false;
@@ -175,6 +176,7 @@ public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
           }
         } catch (InterruptedException e) {
           LOG.log(Level.WARNING, "Interrupted while trying to re-establish watch.", e);
+          Thread.currentThread().interrupt();
         }
       }
     });
@@ -200,39 +202,7 @@ public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
 
   @Override
   protected Map<String, V> delegate() {
-    return localMap;
-  }
-
-  /**
-   * This map is readonly, this method throws a {@link UnsupportedOperationException}
-   */
-  @Override
-  public void clear() {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * This map is readonly, this method throws a {@link UnsupportedOperationException}
-   */
-  @Override
-  public V put(String key, V value) {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * This map is readonly, this method throws a {@link UnsupportedOperationException}
-   */
-  @Override
-  public void putAll(Map<? extends String, ? extends V> m) {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
-   * This map is readonly, this method throws a {@link UnsupportedOperationException}
-   */
-  @Override
-  public V remove(Object key) {
-    throw new UnsupportedOperationException();
+    return unmodifiableLocalMap;
   }
 
   private void tryWatchChildren() throws InterruptedException {
@@ -265,6 +235,7 @@ public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
             tryWatchChildren();
           } catch (InterruptedException e) {
             LOG.log(Level.WARNING, "Interrupted while trying to watch children.", e);
+            Thread.currentThread().interrupt();
           }
         }
       }});
@@ -277,6 +248,7 @@ public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
             tryWatchChildren();
           } catch (InterruptedException e) {
             LOG.log(Level.WARNING, "Interrupted while trying to watch children.", e);
+            Thread.currentThread().interrupt();
           }
         }
       }
@@ -312,6 +284,7 @@ public class ZooKeeperMap<V> extends ForwardingMap<String, V> {
             tryAddChild(child);
           } catch (InterruptedException e) {
             LOG.log(Level.WARNING, "Interrupted while trying to add a child.", e);
+            Thread.currentThread().interrupt();
           }
         } else if (event.getType() == Watcher.Event.EventType.NodeDeleted) {
           removeEntry(child);
