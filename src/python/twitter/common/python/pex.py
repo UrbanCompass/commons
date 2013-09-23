@@ -79,12 +79,31 @@ class PEX(object):
     from twitter.common.collections import OrderedSet
     from pkg_resources import find_distributions
     from distutils.sysconfig import get_python_lib
+    # NOTE(ugo): It seems like this does not capture all the possible site-packages dir on some osx
+    # python installs. While this may potentially be an "issue" with that install, there is no other
+    # problem in the system than this. Hence we workaround this with the HACK below.
     site_libs = set([get_python_lib(plat_specific=False), get_python_lib(plat_specific=True)])
+    for site_lib in site_libs:
+      TRACER.log('Found site-library: %s' % site_lib)
+    for extras_path in cls._extras_paths():
+      TRACER.log('Found site extra: %s' % extras_path)
+      site_libs.add(extras_path)
+    site_libs = set(os.path.normpath(path) for path in site_libs)
     site_distributions = OrderedSet()
     for path_element in sys.path:
+      TRACER.log('Inspecting path element: %s' % path_element)
       if any(path_element.startswith(site_lib) for site_lib in site_libs):
-        TRACER.log('Inspecting path element: %s' % path_element)
+        # NOTE(ugo): This line seems to have an issue - dist.location may be
+        # os.realpath(path_element) i.e. its symlinks may have been dereferenced, in which case our
+        # set algebra will not work.
         site_distributions.update(dist.location for dist in find_distributions(path_element))
+      # HACK(ugo): While the following is not generally correct, it does seem like a no-brainer that
+      # we should not keep any path element that explicitly mentions site-packages.
+      # This is especially important in some of our python installations that end up mentioning
+      # several different symlinks to the same site-pagkages libraries.
+      if 'site-packages' in path_element:
+        site_distributions.add(path_element)
+
     user_site_distributions = OrderedSet(dist.location for dist in find_distributions(USER_SITE))
     for path in site_distributions:
       TRACER.log('Scrubbing from site-packages: %s' % path)
