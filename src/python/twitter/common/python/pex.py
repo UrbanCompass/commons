@@ -85,9 +85,6 @@ class PEX(object):
     site_libs = set([get_python_lib(plat_specific=False), get_python_lib(plat_specific=True)])
     for site_lib in site_libs:
       TRACER.log('Found site-library: %s' % site_lib)
-    for extras_path in cls._extras_paths():
-      TRACER.log('Found site extra: %s' % extras_path)
-      site_libs.add(extras_path)
     site_libs = set(os.path.normpath(path) for path in site_libs)
     site_distributions = OrderedSet()
     for path_element in sys.path:
