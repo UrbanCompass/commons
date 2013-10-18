@@ -113,6 +113,13 @@ class PEX(object):
         TRACER.log('Inspecting path element: %s' % path_element)
         site_distributions.update(dist.location for dist in find_distributions(path_element))
 
+      # HACK(ugo): While the following is not generally correct, it does seem like a no-brainer that
+      # we should not keep any path element that explicitly mentions site-packages.
+      # This is especially important in some of our python installations that end up mentioning
+      # several different symlinks to the same site-pagkages libraries.
+      if 'site-packages' in path_element:
+        site_distributions.add(path_element)
+
     user_site_distributions = OrderedSet(dist.location for dist in find_distributions(USER_SITE))
 
     for path in site_distributions:
