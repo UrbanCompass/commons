@@ -77,7 +77,7 @@ class PythonThriftBuilder(object):
     args = [
       select_thrift_binary(self.config),
       '--gen',
-      'py:new_style',
+      'py:new_style,utf8strings',
       '-recurse',
       '-o',
       os.path.join(self.chroot.path(), self.codegen_root)
