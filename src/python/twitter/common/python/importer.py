@@ -521,6 +521,9 @@ class EggZipImporter(object):
       fullmodname, submodname, is_package, fullpath, len(source)), at_level=3)
     return source
 
+# NOTE(ugo): AFAICT only pylint is disturbed by this missing, but seems good hygiene to replicate
+# the zipimport api correctly.
+ZipImportError = builtin_zipimport.ZipImportError
 
 def monkeypatch():
   monkeypatch_zipimport()
