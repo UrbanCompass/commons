@@ -25,36 +25,63 @@ from twitter.common.python.pex import PEX
 from twitter.pants.base import Target, Address
 from twitter.pants.python.python_chroot import PythonChroot
 
-try:
-  import pylint
-  _HAVE_PYLINT = True
-except ImportError:
-  _HAVE_PYLINT = False
+def can_import(module_name):
+  try:
+    exec 'import ' + module_name
+    return True
+  except ImportError:
+    return False
+
+LINT_TOOLS = {
+  'pylint': {
+    'entry_point': 'pylint.lint',
+    'interpreter_args': ['--rcfile=%s' % os.path.join(
+      '%(root_dir)s', 'build-support', 'pylint', 'pylint.rc')],
+    'lint_target': '3rdparty/python:pylint',
+    'module_name': 'pylint',
+  },
+  'pyflakes': {
+    'entry_point': 'pyflakes.__main__',
+    'interpreter_args': [],
+    'lint_target': '3rdparty/python:pyflakes',
+    'module_name': 'pyflakes',
+  },
+  'flake8': {
+    'entry_point': 'flake8.run',
+    'interpreter_args': [],
+    'lint_target': '3rdparty/python:flake8',
+    'module_name': 'flake8',
+  },
+}
 
 class PythonLintBuilder(object):
-  def __init__(self, targets, args, root_dir, conn_timeout=None):
+  def __init__(self, tool_name, targets, args, root_dir, conn_timeout=None):
+    self._tool_name = tool_name
+    assert self._tool_name in LINT_TOOLS
+    self._opts = LINT_TOOLS[self._tool_name]
     self.targets = targets
     self.args = args
     self.root_dir = root_dir
     self._conn_timeout = conn_timeout
 
   def run(self):
-    if not _HAVE_PYLINT:
-      print('ERROR: Pylint not found!  Skipping.', file=sys.stderr)
+    if not can_import(self._opts['module_name']):
+      print('ERROR: %s not found!  Skipping.' % self._tool_name, file=sys.stderr)
       return 1
     return self._run_lints(self.targets, self.args)
 
   def _run_lint(self, target, args):
-    chroot = PythonChroot(target, self.root_dir, extra_targets=[
-      Target.get(Address.parse(self.root_dir, '3rdparty/python:pylint'))],
+    lint_target = Target.get(Address.parse(self.root_dir, self._opts['lint_target']))
+    assert lint_target, 'Could not find target %r' % self._opts['lint_target']
+    chroot = PythonChroot(target, self.root_dir, extra_targets=[lint_target],
       conn_timeout=self._conn_timeout)
     chroot.builder.info().ignore_errors = True
     builder = chroot.dump()
-    builder.info().entry_point = 'pylint.lint'
+    builder.info().entry_point = self._opts['entry_point']
+    builder.info().run_name = 'main'
     builder.freeze()
 
-    interpreter_args = [
-      '--rcfile=%s' % os.path.join(self.root_dir, 'build-support', 'pylint', 'pylint.rc')]
+    interpreter_args = self._opts['interpreter_args']
     interpreter_args.extend(args or [])
     sources = OrderedSet([])
     target.walk(lambda trg: sources.update(
