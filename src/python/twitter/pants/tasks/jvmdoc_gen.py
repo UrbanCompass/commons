@@ -135,7 +135,9 @@ class JvmdocGen(Task):
     with self.invalidated(filter(language_predicate, targets)) as invalidation_check:
       safe_mkdir(self._output_dir)
       with self.context.state('classpath', []) as cp:
-        classpath = [jar for conf, jar in cp if conf in self.confs]
+        # HACK(Paul): Lets just hardcode javadoc classpath to javadoc-gen:classpath config value
+        classpath = self.context.config.getlist('%s-gen' % self._jvmdoc.tool_name,
+                                                     'classpath', default=[])
 
         def find_jvmdoc_targets():
           invalid_targets = set()
