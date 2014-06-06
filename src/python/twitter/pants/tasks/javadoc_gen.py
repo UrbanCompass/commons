@@ -49,6 +49,7 @@ def create_javadoc_command(classpath, gendir, *targets):
   # TODO(John Sirois): try com.sun.tools.javadoc.Main via ng
   command = [
     'javadoc',
+    '-J-Xmx1024m',
     '-quiet',
     '-encoding', 'UTF-8',
     '-notimestamp',
