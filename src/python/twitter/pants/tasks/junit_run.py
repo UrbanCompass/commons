@@ -177,7 +177,7 @@ class JUnitRun(JvmTask):
       self.coverage_report_html_open
       or context.options.junit_run_coverage_html
     )
-    self.coverage = self.coverage or self.coverage_report_html_open
+    self.coverage = self.coverage or self.coverage_report_html_open or self.coverage_report_html
     self.coverage_html_file = os.path.join(self.coverage_dir, 'html', 'index.html')
 
     self.opts = []
