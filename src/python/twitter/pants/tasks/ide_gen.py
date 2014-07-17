@@ -75,7 +75,7 @@ class IdeGen(JvmBinaryTask):
 
     option_group.add_option(mkflag("intransitive"), default=False,
                             action="store_true", dest='ide_gen_intransitive',
-                            help="Limits the sources included in the generated project to just "
+                            help="Limits the sources incidluded in the generated project to just "
                                  "those owned by the targets specified on the command line")
 
     option_group.add_option(mkflag("python"), mkflag("python", negate=True), default=False,
@@ -113,7 +113,9 @@ class IdeGen(JvmBinaryTask):
     self.skip_scala = not context.options.ide_gen_scala
 
     self.java_language_level = context.options.ide_gen_java_language_level
-    if context.options.ide_gen_java_jdk:
+    if context.config.get('idea', 'gen_java_jdk'):
+      self.java_jdk = context.config.get('idea', 'gen_java_jdk')
+    elif context.options.ide_gen_java_jdk:
       self.java_jdk = context.options.ide_gen_java_jdk
     else:
       self.java_jdk = '1.%d' % self.java_language_level
@@ -522,4 +524,3 @@ class Project(object):
     if self.has_scala:
       self.scala_compiler_classpath.extend(binary_util.profile_classpath(scala_compiler_profile,
         workunit_factory=self.workunit_factory))
-
