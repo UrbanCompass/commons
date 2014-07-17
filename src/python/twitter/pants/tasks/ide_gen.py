@@ -113,7 +113,9 @@ class IdeGen(JvmBinaryTask):
     self.skip_scala = not context.options.ide_gen_scala
 
     self.java_language_level = context.options.ide_gen_java_language_level
-    if context.options.ide_gen_java_jdk:
+    if context.config.get('idea', 'gen_java_jdk'):
+      self.java_jdk = context.config.get('idea', 'gen_java_jdk')
+    elif context.options.ide_gen_java_jdk:
       self.java_jdk = context.options.ide_gen_java_jdk
     else:
       self.java_jdk = '1.%d' % self.java_language_level
